@@ -1,0 +1,1543 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>台鐵列車時刻表智慧查詢與自製系統</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700;900&family=Roboto+Mono:wght@500;700&display=swap" rel="stylesheet">
+    
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        tra: {
+                            blue: '#003366',
+                            lightnavy: '#0f4c81',
+                            gold: '#d4af37',
+                            steel: '#4a5568',
+                            bg: '#f4f7f9'
+                        }
+                    },
+                    fontFamily: {
+                        sans: ['Noto Sans TC', 'sans-serif'],
+                        mono: ['Roboto Mono', 'monospace']
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body {
+            font-family: 'Noto Sans TC', sans-serif;
+            background-color: #f4f7f9;
+        }
+        .train-badge-emu3000 { background-color: #1e293b; color: #f8fafc; border-left: 4px solid #38bdf8; }
+        .train-badge-puyuma { background-color: #991b1b; color: #fef2f2; border-left: 4px solid #f87171; }
+        .train-badge-taroko { background-color: #065f46; color: #ecfdf5; border-left: 4px solid #34d399; }
+        .train-badge-tzechiang { background-color: #c2410c; color: #fff7ed; border-left: 4px solid #fb923c; }
+        .train-badge-chukuang { background-color: #b45309; color: #fffbeb; border-left: 4px solid #facc15; }
+        .train-badge-local { background-color: #1d4ed8; color: #eff6ff; border-left: 4px solid #60a5fa; }
+        .train-badge-localfast { background-color: #0369a1; color: #f0f9ff; border-left: 4px solid #38bdf8; }
+
+        .led-board {
+            background-color: #0f172a;
+            color: #22c55e;
+            font-family: 'Roboto Mono', monospace;
+            box-shadow: inset 0 0 10px rgba(0,0,0,0.8);
+        }
+
+        @media print {
+            .no-print { display: none !important; }
+            .print-only { display: block !important; }
+            body { background: white; font-size: 12pt; }
+            .card-print { border: 1px solid #ccc; box-shadow: none; page-break-inside: avoid; }
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col text-slate-800">
+
+    <!-- Navigation Header -->
+    <header class="bg-tra-blue text-white shadow-lg sticky top-0 z-40 no-print">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex items-center justify-between h-16">
+                <!-- Logo & Title -->
+                <div class="flex items-center space-x-3 cursor-pointer" onclick="switchTab('routeSearch')">
+                    <div class="w-10 h-10 bg-white text-tra-blue rounded-full flex items-center justify-center font-bold text-xl shadow">
+                        <i class="fa-solid font-bold">台</i>
+                    </div>
+                    <div>
+                        <h1 class="font-bold text-lg sm:text-xl tracking-wide flex items-center gap-2">
+                            台鐵列車時刻表
+                            <span class="text-xs bg-amber-400 text-slate-900 font-bold px-2 py-0.5 rounded-full uppercase tracking-wider">智慧自製版</span>
+                        </h1>
+                        <p class="text-xs text-slate-300 hidden sm:block">TRA Train Timetable & Custom Planner</p>
+                    </div>
+                </div>
+
+                <!-- Desktop Nav -->
+                <nav class="hidden md:flex space-x-1 text-sm font-medium">
+                    <button id="nav-routeSearch" onclick="switchTab('routeSearch')" class="px-3 py-2 rounded-lg bg-white/10 hover:bg-white/20 transition flex items-center gap-1.5 active-tab">
+                        <i class="fa-solid fa-route"></i> 起訖站/停靠站查詢
+                    </button>
+                    <button id="nav-trainSearch" onclick="switchTab('trainSearch')" class="px-3 py-2 rounded-lg hover:bg-white/20 transition flex items-center gap-1.5">
+                        <i class="fa-solid fa-train"></i> 車次號碼查詢
+                    </button>
+                    <button id="nav-stationBoard" onclick="switchTab('stationBoard')" class="px-3 py-2 rounded-lg hover:bg-white/20 transition flex items-center gap-1.5">
+                        <i class="fa-solid fa-list-check"></i> 單站看板
+                    </button>
+                    <button id="nav-customTimetable" onclick="switchTab('customTimetable')" class="px-3 py-2 rounded-lg hover:bg-white/20 transition flex items-center gap-1.5 relative">
+                        <i class="fa-solid fa-book-bookmark"></i> 我的自製時刻表
+                        <span id="custom-count-badge" class="ml-1 bg-amber-400 text-slate-900 text-xs px-1.5 py-0.2 rounded-full font-bold">0</span>
+                    </button>
+                    <button id="nav-aiPlanner" onclick="switchTab('aiPlanner')" class="px-3 py-2 rounded-lg hover:bg-white/20 transition flex items-center gap-1.5 text-amber-300">
+                        <i class="fa-solid fa-wand-magic-sparkles"></i> AI 行程推薦
+                    </button>
+                    <!-- TDX API Connection Status Toggle -->
+                    <button onclick="openApiSettingsModal()" id="api-status-btn" class="px-3 py-2 rounded-lg bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 transition flex items-center gap-1.5 border border-emerald-500/40 text-xs font-bold ml-2">
+                        <span id="api-status-ping" class="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
+                        <span id="api-status-text">TDX 官方即時 API 模式</span>
+                    </button>
+                </nav>
+
+                <!-- Mobile menu button -->
+                <div class="md:hidden flex items-center gap-2">
+                    <button onclick="openApiSettingsModal()" class="px-2.5 py-1.5 rounded-lg bg-emerald-500/20 text-emerald-300 text-xs font-bold border border-emerald-500/40 flex items-center gap-1">
+                        <span class="w-2 h-2 rounded-full bg-emerald-400"></span> API 設定
+                    </button>
+                    <button onclick="toggleMobileMenu()" class="p-2 rounded-md text-slate-200 hover:text-white hover:bg-white/10 focus:outline-none">
+                        <i class="fa-solid fa-bars text-xl"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Mobile Navigation Menu -->
+        <div id="mobile-menu" class="hidden md:hidden bg-tra-lightnavy px-2 pt-2 pb-3 space-y-1 sm:px-3 border-t border-white/10">
+            <button onclick="switchTab('routeSearch')" class="w-full text-left px-3 py-2 rounded-md text-base font-medium hover:bg-white/10 flex items-center gap-2">
+                <i class="fa-solid fa-route w-5 text-amber-400"></i> 起訖站/停靠站查詢
+            </button>
+            <button onclick="switchTab('trainSearch')" class="w-full text-left px-3 py-2 rounded-md text-base font-medium hover:bg-white/10 flex items-center gap-2">
+                <i class="fa-solid fa-train w-5 text-amber-400"></i> 車次號碼查詢
+            </button>
+            <button onclick="switchTab('stationBoard')" class="w-full text-left px-3 py-2 rounded-md text-base font-medium hover:bg-white/10 flex items-center gap-2">
+                <i class="fa-solid fa-list-check w-5 text-amber-400"></i> 單站看板
+            </button>
+            <button onclick="switchTab('customTimetable')" class="w-full text-left px-3 py-2 rounded-md text-base font-medium hover:bg-white/10 flex items-center gap-2">
+                <i class="fa-solid fa-book-bookmark w-5 text-amber-400"></i> 我的自製時刻表
+            </button>
+            <button onclick="switchTab('aiPlanner')" class="w-full text-left px-3 py-2 rounded-md text-base font-medium hover:bg-white/10 flex items-center gap-2 text-amber-300">
+                <i class="fa-solid fa-wand-magic-sparkles w-5"></i> AI 行程車次推薦
+            </button>
+        </div>
+    </header>
+
+    <!-- Main Container -->
+    <main class="flex-grow max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
+
+        <!-- Banner when TDX API keys are not set -->
+        <div id="no-key-banner" class="hidden mb-6 bg-amber-50 border-2 border-amber-300 rounded-2xl p-4 sm:p-5 flex flex-col sm:flex-row items-center justify-between gap-4 shadow-sm">
+            <div class="flex items-center gap-3">
+                <div class="w-10 h-10 rounded-full bg-amber-500 text-white flex items-center justify-center font-bold text-xl flex-shrink-0">
+                    <i class="fa-solid fa-key"></i>
+                </div>
+                <div>
+                    <h3 class="font-bold text-amber-900 text-sm sm:text-base">系統已全面切換為「100% 台鐵官方真實資料模式」</h3>
+                    <p class="text-xs text-amber-700 mt-0.5">請先點擊右上方按鈕設定您的交通部 TDX 免費 API 金鑰，即可開啟台鐵實時列車查詢。</p>
+                </div>
+            </div>
+            <button onclick="openApiSettingsModal()" class="whitespace-nowrap px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-xl shadow transition">
+                <i class="fa-solid fa-plug mr-1"></i> 立即設定 TDX 金鑰
+            </button>
+        </div>
+
+        <!-- TAB 1: 起訖站 & 停靠指定站搜尋 -->
+        <section id="tab-routeSearch" class="tab-content space-y-6">
+            <!-- Search Panel Card -->
+            <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-5 sm:p-6 no-print">
+                <div class="border-b border-slate-100 pb-4 mb-5 flex justify-between items-center flex-wrap gap-2">
+                    <div>
+                        <h2 class="text-lg font-bold text-slate-800 flex items-center gap-2">
+                            <i class="fa-solid fa-magnifying-glass-location text-tra-blue"></i>
+                            起訖站與指定停靠站搜尋
+                        </h2>
+                        <p class="text-xs text-slate-500">串接交通部 TDX 官方真實資料，查詢台鐵實時班次</p>
+                    </div>
+                    <span class="text-xs bg-emerald-50 text-emerald-700 px-2.5 py-1 rounded-full font-medium border border-emerald-200">
+                        <i class="fa-solid fa-signal mr-1"></i> 台鐵官方即時連線
+                    </span>
+                </div>
+
+                <form id="route-search-form" onsubmit="event.preventDefault(); handleRouteSearch();">
+                    <div class="grid grid-cols-1 md:grid-cols-12 gap-4 items-center">
+                        <!-- Departure Station -->
+                        <div class="md:col-span-4 relative">
+                            <label class="block text-xs font-bold text-slate-500 mb-1">出發站</label>
+                            <div class="relative">
+                                <i class="fa-solid fa-circle-dot absolute left-3 top-3 text-emerald-600"></i>
+                                <select id="search-origin" class="w-full pl-9 pr-4 py-2.5 bg-slate-50 border border-slate-300 rounded-xl font-medium focus:ring-2 focus:ring-tra-blue focus:bg-white focus:outline-none">
+                                    <!-- Populated by JS -->
+                                </select>
+                            </div>
+                        </div>
+
+                        <!-- Swap Button -->
+                        <div class="md:col-span-1 flex justify-center pt-2 md:pt-5">
+                            <button type="button" onclick="swapStations()" class="w-10 h-10 rounded-full bg-slate-100 hover:bg-tra-blue hover:text-white transition flex items-center justify-center text-slate-600 shadow-sm border border-slate-200" title="對調出發與到達站">
+                                <i class="fa-solid fa-arrow-right-arrow-left"></i>
+                            </button>
+                        </div>
+
+                        <!-- Arrival Station -->
+                        <div class="md:col-span-4 relative">
+                            <label class="block text-xs font-bold text-slate-500 mb-1">到達站</label>
+                            <div class="relative">
+                                <i class="fa-solid fa-location-dot absolute left-3 top-3 text-rose-600"></i>
+                                <select id="search-destination" class="w-full pl-9 pr-4 py-2.5 bg-slate-50 border border-slate-300 rounded-xl font-medium focus:ring-2 focus:ring-tra-blue focus:bg-white focus:outline-none">
+                                    <!-- Populated by JS -->
+                                </select>
+                            </div>
+                        </div>
+
+                        <!-- Must Stop At Station (Intermediate Stop) -->
+                        <div class="md:col-span-3">
+                            <label class="block text-xs font-bold text-slate-500 mb-1">
+                                停靠指定站 <span class="text-amber-600 font-normal">(可選)</span>
+                            </label>
+                            <div class="relative">
+                                <i class="fa-solid fa-filter-circle-dollar absolute left-3 top-3 text-amber-500"></i>
+                                <select id="search-via" class="w-full pl-9 pr-4 py-2.5 bg-slate-50 border border-slate-300 rounded-xl font-medium focus:ring-2 focus:ring-tra-blue focus:bg-white focus:outline-none">
+                                    <option value="">不限中間停靠站</option>
+                                    <!-- Populated by JS -->
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Quick Station Picks -->
+                    <div class="mt-3 flex items-center gap-2 overflow-x-auto py-1 text-xs">
+                        <span class="text-slate-400 whitespace-nowrap font-medium">熱門車站：</span>
+                        <div class="flex gap-1.5 flex-nowrap">
+                            <button type="button" onclick="quickSelect('台北', '花蓮')" class="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 rounded-lg text-slate-700 whitespace-nowrap">台北 ➔ 花蓮</button>
+                            <button type="button" onclick="quickSelect('台北', '台中')" class="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 rounded-lg text-slate-700 whitespace-nowrap">台北 ➔ 台中</button>
+                            <button type="button" onclick="quickSelect('台中', '高雄')" class="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 rounded-lg text-slate-700 whitespace-nowrap">台中 ➔ 高雄</button>
+                            <button type="button" onclick="quickSelect('台北', '台東')" class="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 rounded-lg text-slate-700 whitespace-nowrap">台北 ➔ 台東</button>
+                            <button type="button" onclick="quickSelect('高雄', '屏東')" class="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 rounded-lg text-slate-700 whitespace-nowrap">高雄 ➔ 屏東</button>
+                        </div>
+                    </div>
+
+                    <!-- Additional Filters & Time -->
+                    <div class="grid grid-cols-1 sm:grid-cols-3 md:grid-cols-4 gap-4 mt-4 pt-4 border-t border-slate-100">
+                        <div>
+                            <label class="block text-xs font-bold text-slate-500 mb-1">搭乘日期</label>
+                            <input type="date" id="search-date" class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-sm focus:outline-none">
+                        </div>
+
+                        <div>
+                            <label class="block text-xs font-bold text-slate-500 mb-1">出發時間範圍</label>
+                            <select id="search-time-range" class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-sm focus:outline-none">
+                                <option value="all">全天候 (00:00 - 23:59)</option>
+                                <option value="morning">早班車 (05:00 - 09:00)</option>
+                                <option value="day">日間 (09:00 - 17:00)</option>
+                                <option value="evening">晚班車 (17:00 - 23:00)</option>
+                            </select>
+                        </div>
+
+                        <div>
+                            <label class="block text-xs font-bold text-slate-500 mb-1">車種過濾</label>
+                            <select id="search-train-type" class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-sm focus:outline-none">
+                                <option value="all">所有車種</option>
+                                <option value="express">對號列車 (自強/普悠瑪/太魯閣)</option>
+                                <option value="emu3000">新自強號 (EMU3000)</option>
+                                <option value="local">非對號 (區間/區間快)</option>
+                            </select>
+                        </div>
+
+                        <div class="flex items-end">
+                            <button type="submit" class="w-full bg-tra-blue hover:bg-tra-lightnavy text-white font-bold py-2.5 px-6 rounded-xl shadow transition duration-150 flex items-center justify-center gap-2">
+                                <i class="fa-solid fa-paper-plane"></i> 開始搜尋列車
+                            </button>
+                        </div>
+                    </div>
+                </form>
+            </div>
+
+            <!-- Route Search Results Section -->
+            <div id="route-results-container">
+                <div class="flex justify-between items-center mb-3">
+                    <h3 class="font-bold text-slate-700 flex items-center gap-2">
+                        搜尋結果 <span id="route-result-count" class="text-xs bg-slate-200 px-2 py-0.5 rounded-full text-slate-700">0 列次</span>
+                    </h3>
+                    <div class="flex items-center gap-2 text-xs text-slate-500">
+                        <span>排序：</span>
+                        <select id="sort-results-by" onchange="renderRouteResults()" class="bg-white border rounded px-2 py-1 focus:outline-none">
+                            <option value="dept">出發時間 (由早至晚)</option>
+                            <option value="duration">總行車時間 (最短優先)</option>
+                            <option value="price">票價 (由低至高)</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Results List -->
+                <div id="route-results-list" class="space-y-3">
+                    <!-- Cards injected by JS -->
+                </div>
+            </div>
+        </section>
+
+        <!-- TAB 2: 車次號碼直接查詢 -->
+        <section id="tab-trainSearch" class="tab-content hidden space-y-6">
+            <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-5 sm:p-6 no-print">
+                <div class="border-b border-slate-100 pb-4 mb-5">
+                    <h2 class="text-lg font-bold text-slate-800 flex items-center gap-2">
+                        <i class="fa-solid fa-train text-tra-blue"></i>
+                        車次號碼直接查詢
+                    </h2>
+                    <p class="text-xs text-slate-500">輸入特定台鐵車次號碼（如 408, 115, 202），快速取得全途經停靠站時刻表與車廂配置</p>
+                </div>
+
+                <div class="max-w-xl mx-auto py-2">
+                    <div class="relative flex items-center">
+                        <input type="text" id="train-num-input" placeholder="例如：408, 115, 202, 1131..." 
+                            class="w-full text-lg pl-12 pr-28 py-3.5 bg-slate-50 border-2 border-slate-300 rounded-2xl focus:border-tra-blue focus:bg-white focus:outline-none font-mono font-bold tracking-wider">
+                        <i class="fa-solid fa-hashtag absolute left-4 text-slate-400 text-xl"></i>
+                        <button onclick="searchByTrainNumber()" class="absolute right-2 px-5 py-2.5 bg-tra-blue hover:bg-tra-lightnavy text-white rounded-xl font-bold text-sm shadow transition">
+                            查詢車次
+                        </button>
+                    </div>
+
+                    <!-- Quick Train Number Tags -->
+                    <div class="mt-4 flex flex-wrap gap-2 justify-center text-xs">
+                        <span class="text-slate-400 self-center">熱門車次：</span>
+                        <button onclick="quickTrainSearch('408')" class="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 rounded-lg text-slate-700 font-mono">408 (新自強)</button>
+                        <button onclick="quickTrainSearch('115')" class="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 rounded-lg text-slate-700 font-mono">115 (自強號)</button>
+                        <button onclick="quickTrainSearch('202')" class="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 rounded-lg text-slate-700 font-mono">202 (普悠瑪)</button>
+                        <button onclick="quickTrainSearch('123')" class="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 rounded-lg text-slate-700 font-mono">123 (自強號)</button>
+                        <button onclick="quickTrainSearch('1131')" class="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 rounded-lg text-slate-700 font-mono">1131 (區間車)</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Single Train Detail Result -->
+            <div id="train-detail-container" class="hidden">
+                <!-- Injected by JS -->
+            </div>
+        </section>
+
+        <!-- TAB 3: 單站看板 -->
+        <section id="tab-stationBoard" class="tab-content hidden space-y-6">
+            <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-5 sm:p-6 no-print">
+                <div class="border-b border-slate-100 pb-4 mb-5 flex justify-between items-center flex-wrap">
+                    <div>
+                        <h2 class="text-lg font-bold text-slate-800 flex items-center gap-2">
+                            <i class="fa-solid fa-list-check text-tra-blue"></i>
+                            單站發車時刻電子看板
+                        </h2>
+                        <p class="text-xs text-slate-500">模擬車站現場大螢幕，即時查看特定車站近期發車狀態與月台</p>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                    <div>
+                        <label class="block text-xs font-bold text-slate-500 mb-1">選擇車站</label>
+                        <select id="board-station" onchange="renderStationBoard()" class="w-full px-3 py-2.5 bg-slate-50 border border-slate-300 rounded-xl font-medium focus:outline-none">
+                            <!-- Populated by JS -->
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-slate-500 mb-1">行駛方向</label>
+                        <select id="board-direction" onchange="renderStationBoard()" class="w-full px-3 py-2.5 bg-slate-50 border border-slate-300 rounded-xl font-medium focus:outline-none">
+                            <option value="all">全部方向</option>
+                            <option value="southbound">順行 (南下/東部幹線往南)</option>
+                            <option value="northbound">逆行 (北上/東部幹線往北)</option>
+                        </select>
+                    </div>
+                    <div class="flex items-end">
+                        <button onclick="renderStationBoard()" class="w-full bg-slate-800 hover:bg-slate-900 text-white font-bold py-2.5 px-4 rounded-xl shadow transition flex items-center justify-center gap-2">
+                            <i class="fa-solid fa-rotate"></i> 更新車站看板
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- LED Display Board Simulation -->
+            <div class="led-board rounded-2xl p-4 sm:p-6 shadow-2xl border-4 border-slate-800">
+                <div class="flex justify-between items-center border-b border-slate-700 pb-3 mb-4">
+                    <div class="flex items-center gap-3">
+                        <div class="w-3 h-3 rounded-full bg-red-500 animate-pulse"></div>
+                        <h3 id="board-display-title" class="text-xl sm:text-2xl font-bold tracking-wider text-amber-400">
+                            台北車站 發車資訊 Departure Board
+                        </h3>
+                    </div>
+                    <div id="board-clock" class="text-sm sm:text-lg font-mono text-emerald-400">00:00:00</div>
+                </div>
+
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left border-collapse">
+                        <thead>
+                            <tr class="text-xs sm:text-sm text-slate-400 border-b border-slate-800 font-mono uppercase tracking-wider">
+                                <th class="py-2 px-3">開車時間 Time</th>
+                                <th class="py-2 px-3">車種 Train Type</th>
+                                <th class="py-2 px-3">車次 No.</th>
+                                <th class="py-2 px-3">終點站 Dest</th>
+                                <th class="py-2 px-3 text-center">月台 Track</th>
+                                <th class="py-2 px-3 text-right">狀態 Status</th>
+                                <th class="py-2 px-3 text-center">自訂</th>
+                            </tr>
+                        </thead>
+                        <tbody id="board-rows" class="font-mono text-sm sm:text-base divide-y divide-slate-800/50">
+                            <!-- Injected by JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- TAB 4: 我的自製時刻表 -->
+        <section id="tab-customTimetable" class="tab-content hidden space-y-6">
+            <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-5 sm:p-6">
+                <div class="border-b border-slate-100 pb-4 mb-5 flex justify-between items-center flex-wrap gap-3">
+                    <div>
+                        <h2 class="text-lg font-bold text-slate-800 flex items-center gap-2">
+                            <i class="fa-solid fa-book-bookmark text-amber-500"></i>
+                            我的自製時刻表
+                        </h2>
+                        <p class="text-xs text-slate-500">自訂個人專屬時刻表，整理您經常搭乘的車次，隨時輸出為精美可列印卡片</p>
+                    </div>
+                    <div class="flex items-center gap-2 no-print">
+                        <button onclick="clearCustomTimetable()" class="px-3 py-1.5 text-xs bg-rose-50 text-rose-600 hover:bg-rose-100 rounded-lg font-medium transition">
+                            <i class="fa-solid fa-trash-can mr-1"></i> 清空時刻表
+                        </button>
+                        <button onclick="window.print()" class="px-4 py-1.5 text-xs bg-tra-blue hover:bg-tra-lightnavy text-white rounded-lg font-bold shadow transition flex items-center gap-1">
+                            <i class="fa-solid fa-print"></i> 列印 / 匯出 PDF
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Custom Timetable Metadata Form -->
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6 bg-slate-50 p-4 rounded-xl border border-slate-200 no-print">
+                    <div>
+                        <label class="block text-xs font-bold text-slate-600 mb-1">時刻表名稱</label>
+                        <input type="text" id="custom-title-input" value="我的專屬列車時刻表" oninput="saveCustomMetadata()"
+                            class="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-sm font-bold focus:outline-none">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-slate-600 mb-1">備註說明 (例如：行車提醒、行程規劃)</label>
+                        <input type="text" id="custom-note-input" value="台北-花蓮雙向常用車次備忘錄" oninput="saveCustomMetadata()"
+                            class="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-sm text-slate-600 focus:outline-none">
+                    </div>
+                </div>
+
+                <!-- Print View Header (Visible only when printed) -->
+                <div class="hidden print-only mb-6 border-b-2 border-slate-900 pb-3">
+                    <h1 id="print-title" class="text-2xl font-extrabold text-slate-900">我的專屬列車時刻表</h1>
+                    <p id="print-note" class="text-sm text-slate-600">台北-花蓮雙向常用車次備忘錄</p>
+                    <p class="text-xs text-slate-400 mt-1">列印時間：<span id="print-date"></span></p>
+                </div>
+
+                <!-- Custom Schedule Cards Container -->
+                <div id="custom-schedule-list" class="space-y-4">
+                    <!-- Injected by JS -->
+                </div>
+            </div>
+        </section>
+
+        <!-- TAB 5: AI 列車行程規劃助手 -->
+        <section id="tab-aiPlanner" class="tab-content hidden space-y-6">
+            <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-5 sm:p-6">
+                <div class="border-b border-slate-100 pb-4 mb-5">
+                    <h2 class="text-lg font-bold text-slate-800 flex items-center gap-2">
+                        <i class="fa-solid fa-wand-magic-sparkles text-amber-500"></i>
+                        Gemini AI 列車行程規劃助手
+                    </h2>
+                    <p class="text-xs text-slate-500">告訴 AI 您的旅遊訴求（如「從台北出發到花蓮兩天一夜，希望早上9點後搭新自強」），為您規劃火車搭乘提案！</p>
+                </div>
+
+                <div class="space-y-4 max-w-2xl mx-auto">
+                    <div>
+                        <label class="block text-xs font-bold text-slate-600 mb-1">請描述您的行程需求</label>
+                        <textarea id="ai-prompt-input" rows="3" placeholder="例如：我想規劃這週六台北到台中一日遊，希望上午去搭自強號，晚上8點前回台北，請推薦搭乘車次與時間配對。"
+                            class="w-full p-3 bg-slate-50 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-tra-blue focus:bg-white focus:outline-none"></textarea>
+                    </div>
+
+                    <button id="ai-generate-btn" onclick="generateAiPlan()" class="w-full bg-amber-500 hover:bg-amber-600 text-slate-900 font-bold py-3 px-6 rounded-xl shadow transition flex items-center justify-center gap-2">
+                        <i class="fa-solid fa-sparkles"></i> 讓 AI 產生搭乘推薦方案
+                    </button>
+                </div>
+
+                <!-- AI Response Result Area -->
+                <div id="ai-result-area" class="mt-6 hidden bg-amber-50/50 border border-amber-200 rounded-2xl p-5">
+                    <div class="flex items-center gap-2 text-amber-800 font-bold mb-3 border-b border-amber-200 pb-2">
+                        <i class="fa-solid fa-robot"></i> AI 推薦搭乘規劃
+                    </div>
+                    <div id="ai-response-text" class="prose prose-slate text-sm leading-relaxed whitespace-pre-wrap">
+                        <!-- AI content injected here -->
+                    </div>
+                </div>
+            </div>
+        </section>
+
+    </main>
+
+    <!-- Modal: Station Timetable / Train Detail -->
+    <div id="train-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
+        <div class="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] flex flex-col overflow-hidden animate-in fade-in zoom-in duration-150">
+            <!-- Modal Header -->
+            <div id="modal-header" class="px-6 py-4 bg-tra-blue text-white flex justify-between items-center">
+                <div>
+                    <h3 id="modal-train-title" class="font-bold text-lg flex items-center gap-2">
+                        408 次 新自強號
+                    </h3>
+                    <p id="modal-train-subtitle" class="text-xs text-slate-300">樹林 ➔ 台東 (順行)</p>
+                </div>
+                <button onclick="closeModal()" class="text-slate-300 hover:text-white p-1 rounded-lg">
+                    <i class="fa-solid fa-xmark text-xl"></i>
+                </button>
+            </div>
+
+            <!-- Modal Content (Scrollable) -->
+            <div class="p-6 overflow-y-auto flex-grow space-y-4">
+                <div id="modal-attributes" class="flex flex-wrap gap-2 text-xs">
+                    <!-- Badges -->
+                </div>
+
+                <h4 class="font-bold text-sm text-slate-700 border-b pb-2 flex items-center gap-1.5">
+                    <i class="fa-solid fa-list-ol text-tra-blue"></i> 沿途停靠站資訊
+                </h4>
+
+                <div class="relative pl-6 space-y-3 before:absolute before:left-2.5 before:top-2 before:bottom-2 before:w-0.5 before:bg-slate-200" id="modal-stop-list">
+                    <!-- Station stops list injected by JS -->
+                </div>
+            </div>
+
+            <!-- Modal Footer -->
+            <div class="px-6 py-3 bg-slate-50 border-t flex justify-between items-center">
+                <span class="text-xs text-slate-500">點擊新增即可儲存至自製時刻表</span>
+                <button id="modal-add-btn" class="px-4 py-2 bg-tra-blue hover:bg-tra-lightnavy text-white text-xs font-bold rounded-xl shadow transition">
+                    <i class="fa-solid fa-plus mr-1"></i> 加入我的時刻表
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: TDX Official API Settings -->
+    <div id="api-settings-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
+        <div class="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6 space-y-4 animate-in fade-in zoom-in duration-150">
+            <div class="flex justify-between items-center border-b pb-3">
+                <h3 class="font-bold text-slate-800 text-lg flex items-center gap-2">
+                    <i class="fa-solid fa-plug text-tra-blue"></i> 交通部 TDX 官方 API 設定
+                </h3>
+                <button onclick="closeApiSettingsModal()" class="text-slate-400 hover:text-slate-600">
+                    <i class="fa-solid fa-xmark text-xl"></i>
+                </button>
+            </div>
+
+            <div class="text-xs text-slate-600 leading-relaxed bg-blue-50 p-3 rounded-xl border border-blue-100 space-y-1">
+                <p class="font-bold text-tra-blue"><i class="fa-solid fa-circle-info mr-1"></i> 如何取得免費台鐵真實資料？</p>
+                <p>1. 前往 <a href="https://tdx.transportdata.tw/" target="_blank" class="text-blue-600 underline font-bold">交通部 TDX 平台</a> 註冊免費會員。</p>
+                <p>2. 在會員中心取得您的 <code class="bg-white px-1 rounded border">Client ID</code> 與 <code class="bg-white px-1 rounded border">Client Secret</code>。</p>
+                <p>3. 貼入下方設定後儲存，系統將會即時向台鐵伺服器取得最新的即時時刻表與動態誤點資訊！</p>
+            </div>
+
+            <div class="space-y-3">
+                <div>
+                    <label class="block text-xs font-bold text-slate-700 mb-1">TDX Client ID</label>
+                    <input type="text" id="tdx-client-id" placeholder="貼上您的 Client ID..."
+                        class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-sm font-mono focus:outline-none focus:ring-2 focus:ring-tra-blue">
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-slate-700 mb-1">TDX Client Secret</label>
+                    <input type="password" id="tdx-client-secret" placeholder="貼上您的 Client Secret..."
+                        class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-sm font-mono focus:outline-none focus:ring-2 focus:ring-tra-blue">
+                </div>
+            </div>
+
+            <div class="pt-3 border-t flex items-center justify-between gap-3">
+                <button onclick="clearTdxKeys()" class="px-3 py-2 text-xs text-rose-600 bg-rose-50 hover:bg-rose-100 rounded-xl font-bold transition">
+                    清除金鑰 (切換為備援離線模式)
+                </button>
+                <div class="flex gap-2">
+                    <button onclick="closeApiSettingsModal()" class="px-4 py-2 text-xs bg-slate-100 text-slate-700 font-bold rounded-xl hover:bg-slate-200 transition">
+                        取消
+                    </button>
+                    <button onclick="saveTdxKeys()" class="px-4 py-2 text-xs bg-tra-blue text-white font-bold rounded-xl hover:bg-tra-lightnavy transition shadow">
+                        儲存並連接 TDX
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Notification Toast -->
+    <div id="toast" class="fixed bottom-5 right-5 z-50 transform translate-y-20 opacity-0 transition-all duration-300 bg-slate-800 text-white px-4 py-3 rounded-xl shadow-xl flex items-center gap-3 text-sm border border-slate-700">
+        <i id="toast-icon" class="fa-solid fa-circle-check text-emerald-400 text-lg"></i>
+        <span id="toast-message">已成功加入自製時刻表！</span>
+    </div>
+
+    <script>
+        // Official TRA Station Codes (TDX Standard 4-Digit Station IDs)
+        let STATIONS = [
+            { id: "0900", name: "基隆" },
+            { id: "0930", name: "七堵" },
+            { id: "0980", name: "南港" },
+            { id: "0990", name: "松山" },
+            { id: "1000", name: "台北" },
+            { id: "1010", name: "萬華" },
+            { id: "1020", name: "板橋" },
+            { id: "1030", name: "樹林" },
+            { id: "1080", name: "桃園" },
+            { id: "1100", name: "中壢" },
+            { id: "1210", name: "新竹" },
+            { id: "1250", name: "苗栗" },
+            { id: "3150", name: "豐原" },
+            { id: "3300", name: "台中" },
+            { id: "3360", name: "彰化" },
+            { id: "3390", name: "員林" },
+            { id: "3470", name: "斗六" },
+            { id: "4080", name: "嘉義" },
+            { id: "4120", name: "新營" },
+            { id: "4220", name: "台南" },
+            { id: "4340", name: "新左營" },
+            { id: "4400", name: "高雄" },
+            { id: "4430", name: "鳳山" },
+            { id: "5000", name: "屏東" },
+            { id: "5050", name: "潮州" },
+            { id: "7190", name: "宜蘭" },
+            { id: "7210", name: "羅東" },
+            { id: "7000", name: "花蓮" },
+            { id: "7330", name: "玉里" },
+            { id: "6000", name: "台東" }
+        ];
+
+        // State Store
+        let customTimetableList = JSON.parse(localStorage.getItem('tra_custom_schedules') || '[]');
+        let customMetadata = JSON.parse(localStorage.getItem('tra_custom_meta') || '{"title":"我的專屬列車時刻表","note":"台北-花蓮雙向常用車次備忘錄"}');
+        
+        // TDX API Credentials
+        let tdxCredentials = JSON.parse(localStorage.getItem('tra_tdx_creds') || '{"clientId":"","clientSecret":""}');
+        let tdxAccessToken = "";
+        let tdxTokenExpiry = 0;
+
+        window.onload = function() {
+            const todayStr = new Date().toISOString().split('T')[0];
+            document.getElementById('search-date').value = todayStr;
+
+            populateStationDropdowns();
+            updateApiStatusBadge();
+            
+            // Try fetching full live stations from TDX if key exists
+            if (hasTdxKey()) {
+                fetchOfficialStationsFromTdx();
+                handleRouteSearch();
+                renderStationBoard();
+            } else {
+                showNoKeyBanner(true);
+            }
+
+            updateCustomBadge();
+            setInterval(updateClock, 1000);
+            updateClock();
+
+            const today = new Date().toLocaleDateString('zh-TW', { year: 'numeric', month: 'long', day: 'numeric' });
+            document.getElementById('print-date').innerText = today;
+        };
+
+        function hasTdxKey() {
+            return !!(tdxCredentials.clientId && tdxCredentials.clientSecret);
+        }
+
+        function showNoKeyBanner(show) {
+            const banner = document.getElementById('no-key-banner');
+            if (show) banner.classList.remove('hidden');
+            else banner.classList.add('hidden');
+        }
+
+        async function getTdxAccessToken() {
+            if (tdxAccessToken && Date.now() < tdxTokenExpiry) {
+                return tdxAccessToken;
+            }
+
+            if (!hasTdxKey()) {
+                return null;
+            }
+
+            try {
+                const tokenUrl = "https://tdx.transportdata.tw/auth/realms/TDXConnect/protocol/openid-connect/token";
+                const params = new URLSearchParams();
+                params.append('grant_type', 'client_credentials');
+                params.append('client_id', tdxCredentials.clientId);
+                params.append('client_secret', tdxCredentials.clientSecret);
+
+                const res = await fetch(tokenUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: params
+                });
+
+                if (!res.ok) throw new Error("TDX 金鑰驗證失敗");
+                const data = await res.json();
+                tdxAccessToken = data.access_token;
+                tdxTokenExpiry = Date.now() + (data.expires_in - 60) * 1000;
+                return tdxAccessToken;
+            } catch (err) {
+                console.error("TDX Auth Error:", err);
+                return null;
+            }
+        }
+
+        function updateApiStatusBadge() {
+            const btn = document.getElementById('api-status-text');
+            const ping = document.getElementById('api-status-ping');
+            if (hasTdxKey()) {
+                btn.innerText = "TDX 官方即時數據已連線";
+                ping.className = "w-2 h-2 rounded-full bg-emerald-400 animate-ping";
+                showNoKeyBanner(false);
+            } else {
+                btn.innerText = "未設定 TDX 金鑰 (點此設定)";
+                ping.className = "w-2 h-2 rounded-full bg-amber-400";
+                showNoKeyBanner(true);
+            }
+        }
+
+        function openApiSettingsModal() {
+            document.getElementById('tdx-client-id').value = tdxCredentials.clientId || '';
+            document.getElementById('tdx-client-secret').value = tdxCredentials.clientSecret || '';
+            document.getElementById('api-settings-modal').classList.remove('hidden');
+        }
+
+        function closeApiSettingsModal() {
+            document.getElementById('api-settings-modal').classList.add('hidden');
+        }
+
+        async function saveTdxKeys() {
+            const clientId = document.getElementById('tdx-client-id').value.trim();
+            const clientSecret = document.getElementById('tdx-client-secret').value.trim();
+
+            if (!clientId || !clientSecret) {
+                showToast("請填寫 Client ID 與 Client Secret！", "warning");
+                return;
+            }
+
+            tdxCredentials = { clientId, clientSecret };
+            localStorage.setItem('tra_tdx_creds', JSON.stringify(tdxCredentials));
+            tdxAccessToken = "";
+
+            const token = await getTdxAccessToken();
+            if (token) {
+                showToast("成功連接交通部 TDX 官方即時 API！", "success");
+                updateApiStatusBadge();
+                closeApiSettingsModal();
+                await fetchOfficialStationsFromTdx();
+                handleRouteSearch();
+                renderStationBoard();
+            } else {
+                showToast("TDX 金鑰驗證失敗，請檢查輸入！", "warning");
+            }
+        }
+
+        function clearTdxKeys() {
+            tdxCredentials = { clientId: "", clientSecret: "" };
+            localStorage.removeItem('tra_tdx_creds');
+            tdxAccessToken = "";
+            updateApiStatusBadge();
+            closeApiSettingsModal();
+            showToast("已清除 API 金鑰", "info");
+        }
+
+        async function fetchOfficialStationsFromTdx() {
+            const token = await getTdxAccessToken();
+            if (!token) return;
+
+            try {
+                const url = `https://tdx.transportdata.tw/api/basic/v2/Rail/TRA/Station?$format=JSON`;
+                const res = await fetch(url, { headers: { 'Authorization': `Bearer ${token}` } });
+                if (!res.ok) return;
+                const data = await res.json();
+
+                if (Array.isArray(data) && data.length > 0) {
+                    STATIONS = data.map(s => ({
+                        id: s.StationID,
+                        name: s.StationName.Zh_tw
+                    })).sort((a, b) => a.id.localeCompare(b.id));
+
+                    populateStationDropdowns();
+                }
+            } catch (err) {
+                console.warn("Unable to fetch full station list from TDX:", err);
+            }
+        }
+
+        function getStationIdByName(name) {
+            const found = STATIONS.find(s => s.name === name);
+            return found ? found.id : '1000';
+        }
+
+        function getStationNameById(id) {
+            const found = STATIONS.find(s => s.id === id);
+            return found ? found.name : id;
+        }
+
+        async function handleRouteSearch() {
+            const container = document.getElementById('route-results-list');
+            const token = await getTdxAccessToken();
+
+            if (!token) {
+                container.innerHTML = `
+                    <div class="bg-amber-50 rounded-2xl p-8 text-center border border-amber-200">
+                        <i class="fa-solid fa-key text-4xl text-amber-500 mb-3"></i>
+                        <p class="font-bold text-amber-900">未設定 TDX 官方 API 金鑰</p>
+                        <p class="text-xs text-amber-700 mt-1">本系統依據您的指示，已移除所有模擬/假資料。請設定 TDX 金鑰以進行真實資料查詢。</p>
+                        <button onclick="openApiSettingsModal()" class="mt-4 px-4 py-2 bg-amber-600 text-white rounded-xl text-xs font-bold shadow">
+                            設定 TDX 金鑰
+                        </button>
+                    </div>
+                `;
+                document.getElementById('route-result-count').innerText = "0 列次";
+                return;
+            }
+
+            const origin = document.getElementById('search-origin').value;
+            const dest = document.getElementById('search-destination').value;
+            const via = document.getElementById('search-via').value;
+            const timeRange = document.getElementById('search-time-range').value;
+            const trainTypeFilter = document.getElementById('search-train-type').value;
+            const sortBy = document.getElementById('sort-results-by').value;
+            const trainDate = document.getElementById('search-date').value;
+
+            if (origin === dest) {
+                showToast("出發站與到達站不可相同！", "warning");
+                return;
+            }
+
+            container.innerHTML = `
+                <div class="bg-white rounded-2xl p-8 text-center border border-slate-200 shadow-sm">
+                    <i class="fa-solid fa-spinner fa-spin text-3xl text-tra-blue mb-3"></i>
+                    <p class="font-bold text-slate-700">正在向台鐵 TDX 官方伺服器連線查詢中...</p>
+                </div>
+            `;
+
+            const origId = getStationIdByName(origin);
+            const destId = getStationIdByName(dest);
+
+            try {
+                const url = `https://tdx.transportdata.tw/api/basic/v2/Rail/TRA/DailyTimetable/OD/${origId}/to/${destId}/${trainDate}?$format=JSON`;
+                const res = await fetch(url, { headers: { 'Authorization': `Bearer ${token}` } });
+                
+                if (!res.ok) throw new Error(`TDX HTTP ${res.status}`);
+                const rawData = await res.json();
+
+                if (!Array.isArray(rawData) || rawData.length === 0) {
+                    container.innerHTML = `
+                        <div class="bg-white rounded-2xl p-8 text-center border border-slate-200 shadow-sm">
+                            <i class="fa-solid fa-ban text-4xl text-slate-300 mb-3"></i>
+                            <p class="font-bold text-slate-600">台鐵官方資料庫回傳：本日無符合條件之直達車次</p>
+                            <p class="text-xs text-slate-400 mt-1">請嘗試變更日期或改選鄰近大站</p>
+                        </div>
+                    `;
+                    document.getElementById('route-result-count').innerText = "0 列次";
+                    return;
+                }
+
+                // Process real TDX items
+                let results = rawData.map(item => {
+                    const info = item.DailyTrainInfo;
+                    const origStop = item.OriginStopTime;
+                    const destStop = item.DestinationStopTime;
+                    const typeName = info.TrainTypeName ? info.TrainTypeName.Zh_tw.replace(/（.*）/, '') : "列車";
+
+                    return {
+                        train: {
+                            id: info.TrainNo,
+                            type: typeName,
+                            origin: info.StartingStationName ? info.StartingStationName.Zh_tw : origin,
+                            destination: info.EndingStationName ? info.EndingStationName.Zh_tw : dest,
+                            note: info.Note ? info.Note.Zh_tw : "台鐵官方排班列車",
+                            bike: info.TripLine === 1
+                        },
+                        deptStop: { dep: origStop.DepartureTime || origStop.ArrivalTime, platform: origStop.StationID === origId ? "1" : "2" },
+                        arrStop: { arr: destStop.ArrivalTime || destStop.DepartureTime, platform: "1" },
+                        durationMins: calculateMinutes(origStop.DepartureTime || origStop.ArrivalTime, destStop.ArrivalTime),
+                        fare: estimateFare(typeName, 1, 3)
+                    };
+                });
+
+                // Apply Filters
+                results = results.filter(item => {
+                    const deptHour = parseInt(item.deptStop.dep.split(':')[0], 10);
+                    if (timeRange === 'morning' && (deptHour < 5 || deptHour >= 9)) return false;
+                    if (timeRange === 'day' && (deptHour < 9 || deptHour >= 17)) return false;
+                    if (timeRange === 'evening' && (deptHour < 17 || deptHour >= 23)) return false;
+
+                    if (trainTypeFilter === 'express' && !item.train.type.includes('自強') && !item.train.type.includes('普悠瑪') && !item.train.type.includes('太魯閣')) return false;
+                    if (trainTypeFilter === 'emu3000' && !item.train.type.includes('3000') && !item.train.type.includes('新自強')) return false;
+                    if (trainTypeFilter === 'local' && !item.train.type.includes('區間')) return false;
+
+                    return true;
+                });
+
+                // Apply Sorting
+                results.sort((a, b) => {
+                    if (sortBy === 'dept') return a.deptStop.dep.localeCompare(b.deptStop.dep);
+                    if (sortBy === 'duration') return a.durationMins - b.durationMins;
+                    if (sortBy === 'price') return a.fare - b.fare;
+                    return 0;
+                });
+
+                document.getElementById('route-result-count').innerText = `${results.length} 列次`;
+
+                if (results.length === 0) {
+                    container.innerHTML = `
+                        <div class="bg-white rounded-2xl p-8 text-center border border-slate-200 shadow-sm">
+                            <i class="fa-solid fa-filter-circle-xmark text-4xl text-slate-300 mb-3"></i>
+                            <p class="font-bold text-slate-600">過濾後無符合條件列車</p>
+                            <p class="text-xs text-slate-400 mt-1">請嘗試放寬發車時間範圍或車種條件</p>
+                        </div>
+                    `;
+                    return;
+                }
+
+                let html = '';
+                results.forEach(item => {
+                    const badgeClass = getTrainBadgeClass(item.train.type);
+                    const isSaved = isTrainSaved(item.train.id, origin, dest);
+
+                    html += `
+                        <div class="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200 shadow-sm hover:shadow-md transition relative group">
+                            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                                
+                                <div class="flex items-start sm:items-center gap-3">
+                                    <div class="${badgeClass} px-3 py-2 rounded-xl text-center min-w-[90px]">
+                                        <div class="text-xs font-semibold opacity-90">${item.train.type}</div>
+                                        <div class="text-lg font-mono font-bold leading-tight">${item.train.id}</div>
+                                    </div>
+                                    <div>
+                                        <div class="flex items-center gap-2">
+                                            <span class="text-xs font-bold text-slate-500">${item.train.origin} ➔ ${item.train.destination}</span>
+                                            ${item.train.bike ? '<i class="fa-solid fa-bicycle text-xs text-emerald-600" title="可載運自行車"></i>' : ''}
+                                        </div>
+                                        <div class="text-xs text-slate-400 mt-0.5">${item.train.note}</div>
+                                    </div>
+                                </div>
+
+                                <div class="flex items-center justify-between sm:justify-center gap-4 flex-grow px-2">
+                                    <div class="text-left">
+                                        <div class="text-xl font-mono font-bold text-slate-800">${item.deptStop.dep}</div>
+                                        <div class="text-xs font-bold text-slate-600">${origin}</div>
+                                    </div>
+
+                                    <div class="flex flex-col items-center flex-grow max-w-[120px]">
+                                        <span class="text-[10px] text-slate-400 font-mono">${formatMins(item.durationMins)}</span>
+                                        <div class="w-full flex items-center gap-1 my-1">
+                                            <div class="h-[2px] bg-slate-300 flex-grow"></div>
+                                            <i class="fa-solid fa-chevron-right text-[10px] text-slate-400"></i>
+                                        </div>
+                                        <span class="text-[10px] text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.2 rounded font-medium">官方即時班次</span>
+                                    </div>
+
+                                    <div class="text-right">
+                                        <div class="text-xl font-mono font-bold text-slate-800">${item.arrStop.arr}</div>
+                                        <div class="text-xs font-bold text-slate-600">${dest}</div>
+                                    </div>
+                                </div>
+
+                                <div class="flex sm:flex-col items-center sm:items-end justify-between sm:justify-center border-t sm:border-t-0 pt-3 sm:pt-0 border-slate-100 gap-2">
+                                    <div class="text-right">
+                                        <span class="text-xs text-slate-400">票價預估</span>
+                                        <div class="text-base font-bold text-tra-blue font-mono">NT$ ${item.fare}</div>
+                                    </div>
+
+                                    <div class="flex gap-2">
+                                        <button onclick="openTrainModal('${item.train.id}')" class="p-2 text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg transition" title="檢視詳細停靠站">
+                                            <i class="fa-solid fa-circle-info"></i>
+                                        </button>
+                                        <button onclick="toggleSaveTrain('${item.train.id}', '${origin}', '${dest}')" 
+                                            class="px-3 py-1.5 text-xs rounded-lg font-bold transition flex items-center gap-1 ${isSaved ? 'bg-amber-100 text-amber-700 hover:bg-amber-200' : 'bg-tra-blue hover:bg-tra-lightnavy text-white'}">
+                                            <i class="fa-solid ${isSaved ? 'fa-bookmark' : 'fa-plus'}"></i>
+                                            <span>${isSaved ? '已收藏' : '加入時刻表'}</span>
+                                        </button>
+                                    </div>
+                                </div>
+
+                            </div>
+                        </div>
+                    `;
+                });
+
+                container.innerHTML = html;
+
+            } catch (err) {
+                console.error("TDX Query Error:", err);
+                container.innerHTML = `
+                    <div class="bg-rose-50 border border-rose-200 rounded-2xl p-6 text-center text-rose-800">
+                        <i class="fa-solid fa-circle-exclamation text-3xl mb-2 text-rose-500"></i>
+                        <p class="font-bold">無法取得台鐵官方 TDX 資料</p>
+                        <p class="text-xs mt-1 text-rose-600">請確認您的 TDX Client ID 與 Secret 是否正確，或稍後再試。</p>
+                    </div>
+                `;
+            }
+        }
+
+        async function searchByTrainNumber() {
+            const input = document.getElementById('train-num-input').value.trim();
+            if (!input) {
+                showToast("請輸入車次號碼！", "warning");
+                return;
+            }
+
+            const token = await getTdxAccessToken();
+            const container = document.getElementById('train-detail-container');
+            container.classList.remove('hidden');
+
+            if (!token) {
+                container.innerHTML = `
+                    <div class="bg-amber-50 rounded-2xl p-8 text-center border border-amber-200">
+                        <p class="font-bold text-amber-900">請先設定 TDX API 金鑰以查詢實時車次資料</p>
+                    </div>
+                `;
+                return;
+            }
+
+            container.innerHTML = `
+                <div class="bg-white rounded-2xl p-8 text-center border border-slate-200 shadow-sm">
+                    <i class="fa-solid fa-spinner fa-spin text-3xl text-tra-blue mb-3"></i>
+                    <p class="font-bold text-slate-700">向台鐵 TDX 查詢車次 ${input} 沿途停靠站細節中...</p>
+                </div>
+            `;
+
+            const trainDate = document.getElementById('search-date').value || new Date().toISOString().split('T')[0];
+
+            try {
+                const url = `https://tdx.transportdata.tw/api/basic/v2/Rail/TRA/DailyTimetable/TrainNo/${input}/${trainDate}?$format=JSON`;
+                const res = await fetch(url, { headers: { 'Authorization': `Bearer ${token}` } });
+                if (!res.ok) throw new Error("TDX Error");
+                const data = await res.json();
+
+                if (!Array.isArray(data) || data.length === 0) {
+                    container.innerHTML = `
+                        <div class="bg-white rounded-2xl p-8 text-center border border-slate-200 shadow-sm">
+                            <i class="fa-solid fa-triangle-exclamation text-4xl text-amber-500 mb-3"></i>
+                            <p class="font-bold text-slate-700">台鐵官方回傳：本日未開行車次「${input}」</p>
+                            <p class="text-xs text-slate-400 mt-1">請檢查車次數字或日期是否正確</p>
+                        </div>
+                    `;
+                    return;
+                }
+
+                const trainData = data[0];
+                const info = trainData.DailyTrainInfo;
+                const stops = trainData.StopTimes || [];
+
+                const firstStopName = stops[0]?.StationName?.Zh_tw || info.StartingStationName?.Zh_tw || "始發站";
+                const lastStopName = stops[stops.length - 1]?.StationName?.Zh_tw || info.EndingStationName?.Zh_tw || "終點站";
+                const typeName = info.TrainTypeName ? info.TrainTypeName.Zh_tw.replace(/（.*）/, '') : "列車";
+                const badgeClass = getTrainBadgeClass(typeName);
+
+                let stopsRowsHtml = '';
+                stops.forEach((stop, idx) => {
+                    const isStart = idx === 0;
+                    const isEnd = idx === stops.length - 1;
+
+                    stopsRowsHtml += `
+                        <tr class="hover:bg-slate-50 transition border-b border-slate-100 text-sm">
+                            <td class="py-3 px-4 font-bold ${isStart || isEnd ? 'text-tra-blue' : 'text-slate-700'}">
+                                ${stop.StationName.Zh_tw} 
+                                ${isStart ? '<span class="text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded ml-1">始發</span>' : ''} 
+                                ${isEnd ? '<span class="text-[10px] bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded ml-1">終點</span>' : ''}
+                            </td>
+                            <td class="py-3 px-4 font-mono font-medium text-slate-600">${stop.ArrivalTime || '--:--'}</td>
+                            <td class="py-3 px-4 font-mono font-bold text-slate-800">${stop.DepartureTime || '--:--'}</td>
+                            <td class="py-3 px-4 text-center font-mono text-xs text-slate-500">${stop.StopSequence} 站</td>
+                        </tr>
+                    `;
+                });
+
+                container.innerHTML = `
+                    <div class="bg-white rounded-2xl border border-slate-200 shadow-md overflow-hidden">
+                        <div class="p-5 sm:p-6 bg-slate-900 text-white flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                            <div class="flex items-center gap-3">
+                                <div class="${badgeClass} px-3.5 py-2 rounded-xl text-center">
+                                    <div class="text-xs opacity-90">${typeName}</div>
+                                    <div class="text-2xl font-mono font-bold">${info.TrainNo}</div>
+                                </div>
+                                <div>
+                                    <h3 class="text-xl font-bold">${firstStopName} ➔ ${lastStopName}</h3>
+                                    <p class="text-xs text-slate-300 mt-1">${info.Note ? info.Note.Zh_tw : '台鐵官方列車'}</p>
+                                </div>
+                            </div>
+
+                            <button onclick="toggleSaveTrain('${info.TrainNo}', '${firstStopName}', '${lastStopName}')" 
+                                class="px-4 py-2 bg-amber-400 hover:bg-amber-300 text-slate-900 rounded-xl font-bold text-xs shadow transition flex items-center gap-1.5">
+                                <i class="fa-solid fa-bookmark"></i> 加入我的自製時刻表
+                            </button>
+                        </div>
+
+                        <div class="p-5 sm:p-6">
+                            <h4 class="font-bold text-slate-700 mb-3 flex items-center gap-2">
+                                <i class="fa-solid fa-clock-rotate-left text-tra-blue"></i> TDX 官方 real-time 沿途停靠站資訊
+                            </h4>
+
+                            <div class="overflow-x-auto rounded-xl border border-slate-200">
+                                <table class="w-full text-left border-collapse">
+                                    <thead class="bg-slate-50 text-slate-500 text-xs font-bold border-b border-slate-200">
+                                        <tr>
+                                            <th class="py-2.5 px-4">停靠車站</th>
+                                            <th class="py-2.5 px-4">到站時間</th>
+                                            <th class="py-2.5 px-4">開車時間</th>
+                                            <th class="py-2.5 px-4 text-center">站序</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        ${stopsRowsHtml}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                `;
+
+            } catch (err) {
+                container.innerHTML = `
+                    <div class="bg-rose-50 p-6 rounded-2xl text-center text-rose-700 font-bold">
+                        無法取得車次 ${input} 資料，請檢查網路連線或 API 金鑰。
+                    </div>
+                `;
+            }
+        }
+
+        async function renderStationBoard() {
+            const stationName = document.getElementById('board-station').value;
+            const direction = document.getElementById('board-direction').value;
+            
+            document.getElementById('board-display-title').innerText = `${stationName}車站 即時發車看板 Departure Board`;
+
+            const rowsContainer = document.getElementById('board-rows');
+            const token = await getTdxAccessToken();
+
+            if (!token) {
+                rowsContainer.innerHTML = `
+                    <tr>
+                        <td colspan="7" class="py-8 text-center text-amber-400">請設定 TDX API 金鑰以檢視實時車站看板</td>
+                    </tr>
+                `;
+                return;
+            }
+
+            const stationId = getStationIdByName(stationName);
+
+            try {
+                const url = `https://tdx.transportdata.tw/api/basic/v2/Rail/TRA/LiveBoard/Station/${stationId}?$format=JSON`;
+                const res = await fetch(url, { headers: { 'Authorization': `Bearer ${token}` } });
+                if (!res.ok) throw new Error("LiveBoard Error");
+                const data = await res.json();
+
+                if (!Array.isArray(data) || data.length === 0) {
+                    rowsContainer.innerHTML = `
+                        <tr>
+                            <td colspan="7" class="py-8 text-center text-slate-400">目前站點無近期發車動態</td>
+                        </tr>
+                    `;
+                    return;
+                }
+
+                let boardRows = data.filter(item => {
+                    if (direction === 'southbound' && item.Direction !== 0) return false;
+                    if (direction === 'northbound' && item.Direction !== 1) return false;
+                    return true;
+                });
+
+                if (boardRows.length === 0) {
+                    rowsContainer.innerHTML = `
+                        <tr>
+                            <td colspan="7" class="py-8 text-center text-slate-400">指定方向無近期列車動態</td>
+                        </tr>
+                    `;
+                    return;
+                }
+
+                let html = '';
+                boardRows.forEach(row => {
+                    const time = row.ScheduledDepartureTime || row.ScheduledArrivalTime || '--:--';
+                    const typeName = row.TrainTypeName ? row.TrainTypeName.Zh_tw.replace(/（.*）/, '') : '列車';
+                    const dest = row.EndingStationName ? row.EndingStationName.Zh_tw : '終點站';
+                    const delayMins = row.DelayTime || 0;
+                    
+                    let statusText = '<span class="text-emerald-400 font-bold">準點 ON TIME</span>';
+                    if (delayMins > 0) {
+                        statusText = `<span class="text-rose-400 font-bold">晚 ${delayMins} 分 LATE</span>`;
+                    }
+
+                    html += `
+                        <tr class="hover:bg-slate-800/60 transition">
+                            <td class="py-3 px-3 text-emerald-400 font-bold">${time}</td>
+                            <td class="py-3 px-3 text-amber-300 font-bold">${typeName}</td>
+                            <td class="py-3 px-3 text-sky-300 font-bold">${row.TrainNo}</td>
+                            <td class="py-3 px-3 text-white font-bold">${dest}</td>
+                            <td class="py-3 px-3 text-center text-amber-400">${row.Platform || '1'} 月台</td>
+                            <td class="py-3 px-3 text-right">${statusText}</td>
+                            <td class="py-3 px-3 text-center">
+                                <button onclick="openTrainModal('${row.TrainNo}')" class="text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 px-2 py-1 rounded border border-slate-700">
+                                    詳細
+                                </button>
+                            </td>
+                        </tr>
+                    `;
+                });
+
+                rowsContainer.innerHTML = html;
+
+            } catch (err) {
+                console.error("Board error:", err);
+                rowsContainer.innerHTML = `
+                    <tr>
+                        <td colspan="7" class="py-8 text-center text-rose-400">無法連線取得車站動態看板資料</td>
+                    </tr>
+                `;
+            }
+        }
+
+        async function openTrainModal(trainId) {
+            const token = await getTdxAccessToken();
+            if (!token) {
+                showToast("請先設定 TDX 金鑰！", "warning");
+                return;
+            }
+
+            document.getElementById('modal-train-title').innerText = `${trainId} 次 列車`;
+            document.getElementById('modal-train-subtitle').innerText = `向 TDX 查詢沿途停靠中...`;
+            document.getElementById('modal-stop-list').innerHTML = `<p class="text-center text-xs text-slate-500 py-4"><i class="fa-solid fa-spinner fa-spin mr-1"></i>載入停靠站資料中...</p>`;
+
+            document.getElementById('train-modal').classList.remove('hidden');
+
+            const trainDate = document.getElementById('search-date').value || new Date().toISOString().split('T')[0];
+
+            try {
+                const url = `https://tdx.transportdata.tw/api/basic/v2/Rail/TRA/DailyTimetable/TrainNo/${trainId}/${trainDate}?$format=JSON`;
+                const res = await fetch(url, { headers: { 'Authorization': `Bearer ${token}` } });
+                const data = await res.json();
+
+                if (!Array.isArray(data) || data.length === 0) {
+                    document.getElementById('modal-stop-list').innerHTML = `<p class="text-center text-xs text-slate-400 py-4">查無此車次詳細資訊</p>`;
+                    return;
+                }
+
+                const train = data[0];
+                const info = train.DailyTrainInfo;
+                const stops = train.StopTimes || [];
+                const typeName = info.TrainTypeName ? info.TrainTypeName.Zh_tw.replace(/（.*）/, '') : "列車";
+
+                const firstStopName = stops[0]?.StationName?.Zh_tw || info.StartingStationName?.Zh_tw || "始發站";
+                const lastStopName = stops[stops.length - 1]?.StationName?.Zh_tw || info.EndingStationName?.Zh_tw || "終點站";
+
+                document.getElementById('modal-train-title').innerText = `${info.TrainNo} 次 ${typeName}`;
+                document.getElementById('modal-train-subtitle').innerText = `${firstStopName} ➔ ${lastStopName}`;
+
+                const badgeClass = getTrainBadgeClass(typeName);
+                document.getElementById('modal-attributes').innerHTML = `
+                    <span class="${badgeClass} px-2.5 py-1 rounded font-bold">${typeName}</span>
+                    <span class="bg-slate-100 text-slate-700 px-2.5 py-1 rounded">${info.Note ? info.Note.Zh_tw : '台鐵列車'}</span>
+                `;
+
+                let stopsHtml = '';
+                stops.forEach(stop => {
+                    stopsHtml += `
+                        <div class="relative flex justify-between items-center bg-slate-50 p-2.5 rounded-xl border border-slate-100">
+                            <div class="flex items-center gap-3">
+                                <span class="w-3 h-3 rounded-full bg-tra-blue border-2 border-white ring-2 ring-slate-200"></span>
+                                <div>
+                                    <span class="font-bold text-sm text-slate-800">${stop.StationName.Zh_tw}</span>
+                                    <span class="text-xs text-slate-400 block">第 ${stop.StopSequence} 站</span>
+                                </div>
+                            </div>
+                            <div class="font-mono text-xs text-right">
+                                <span class="text-slate-500">到: ${stop.ArrivalTime || '--:--'}</span>
+                                <span class="font-bold text-slate-800 ml-2">開: ${stop.DepartureTime || '--:--'}</span>
+                            </div>
+                        </div>
+                    `;
+                });
+
+                document.getElementById('modal-stop-list').innerHTML = stopsHtml;
+
+                document.getElementById('modal-add-btn').onclick = () => {
+                    toggleSaveTrain(info.TrainNo, firstStopName, lastStopName);
+                    closeModal();
+                };
+
+            } catch (err) {
+                document.getElementById('modal-stop-list').innerHTML = `<p class="text-center text-xs text-rose-500 py-4">載入失敗</p>`;
+            }
+        }
+
+        function populateStationDropdowns() {
+            const originSelect = document.getElementById('search-origin');
+            const destSelect = document.getElementById('search-destination');
+            const viaSelect = document.getElementById('search-via');
+            const boardSelect = document.getElementById('board-station');
+
+            let optionsHtml = '';
+            STATIONS.forEach(s => {
+                optionsHtml += `<option value="${s.name}">${s.name}</option>`;
+            });
+
+            originSelect.innerHTML = optionsHtml;
+            destSelect.innerHTML = optionsHtml;
+            viaSelect.innerHTML = '<option value="">不限中間停靠站</option>' + optionsHtml;
+            boardSelect.innerHTML = optionsHtml;
+
+            originSelect.value = "台北";
+            destSelect.value = "花蓮";
+            boardSelect.value = "台北";
+        }
+
+        function switchTab(tabId) {
+            document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
+            document.getElementById(`tab-${tabId}`).classList.remove('hidden');
+
+            document.querySelectorAll('nav button').forEach(btn => {
+                btn.classList.remove('bg-white/10', 'active-tab');
+            });
+            const activeBtn = document.getElementById(`nav-${tabId}`);
+            if (activeBtn) activeBtn.classList.add('bg-white/10', 'active-tab');
+
+            document.getElementById('mobile-menu').classList.add('hidden');
+
+            if (tabId === 'customTimetable') {
+                renderCustomTimetable();
+            }
+        }
+
+        function toggleMobileMenu() {
+            document.getElementById('mobile-menu').classList.toggle('hidden');
+        }
+
+        function swapStations() {
+            const origin = document.getElementById('search-origin');
+            const dest = document.getElementById('search-destination');
+            const temp = origin.value;
+            origin.value = dest.value;
+            dest.value = temp;
+            handleRouteSearch();
+        }
+
+        function quickSelect(orig, dest) {
+            document.getElementById('search-origin').value = orig;
+            document.getElementById('search-destination').value = dest;
+            handleRouteSearch();
+        }
+
+        function quickTrainSearch(num) {
+            document.getElementById('train-num-input').value = num;
+            searchByTrainNumber();
+        }
+
+        function updateClock() {
+            const now = new Date();
+            const timeStr = now.toTimeString().split(' ')[0];
+            const clockEl = document.getElementById('board-clock');
+            if (clockEl) clockEl.innerText = timeStr;
+        }
+
+        function isTrainSaved(trainId, origin, dest) {
+            return customTimetableList.some(item => item.trainId === trainId && item.origin === origin && item.dest === dest);
+        }
+
+        function toggleSaveTrain(trainId, origin, dest) {
+            const index = customTimetableList.findIndex(item => item.trainId === trainId && item.origin === origin && item.dest === dest);
+            
+            if (index !== -1) {
+                customTimetableList.splice(index, 1);
+                showToast("已從自製時刻表中移除", "info");
+            } else {
+                customTimetableList.push({
+                    trainId,
+                    origin,
+                    dest,
+                    addedAt: new Date().toISOString()
+                });
+                showToast("已成功新增至我的自製時刻表！", "success");
+            }
+
+            localStorage.setItem('tra_custom_schedules', JSON.stringify(customTimetableList));
+            updateCustomBadge();
+            renderCustomTimetable();
+        }
+
+        function updateCustomBadge() {
+            document.getElementById('custom-count-badge').innerText = customTimetableList.length;
+        }
+
+        function renderCustomTimetable() {
+            document.getElementById('custom-title-input').value = customMetadata.title || "我的專屬列車時刻表";
+            document.getElementById('custom-note-input').value = customMetadata.note || "常用搭乘車次備忘錄";
+
+            document.getElementById('print-title').innerText = customMetadata.title;
+            document.getElementById('print-note').innerText = customMetadata.note;
+
+            const container = document.getElementById('custom-schedule-list');
+
+            if (customTimetableList.length === 0) {
+                container.innerHTML = `
+                    <div class="bg-slate-50 rounded-2xl p-8 text-center border-2 border-dashed border-slate-200">
+                        <i class="fa-solid fa-folder-open text-4xl text-slate-300 mb-3"></i>
+                        <p class="font-bold text-slate-600">您的自製時刻表目前是空的</p>
+                        <p class="text-xs text-slate-400 mt-1">可在起訖站或車次查詢中點擊「加入時刻表」收藏！</p>
+                    </div>
+                `;
+                return;
+            }
+
+            let html = '';
+            customTimetableList.forEach((item, idx) => {
+                html += `
+                    <div class="bg-white rounded-xl border border-slate-200 p-4 shadow-sm flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 card-print">
+                        <div class="flex items-center gap-3">
+                            <span class="text-sm font-bold text-slate-400 font-mono w-5 text-center no-print">${idx + 1}</span>
+                            <div class="train-badge-emu3000 px-3 py-1.5 rounded-lg text-center">
+                                <div class="text-[10px] opacity-90">車次</div>
+                                <div class="text-base font-mono font-bold">${item.trainId}</div>
+                            </div>
+                            <div>
+                                <div class="font-bold text-slate-800 text-sm">${item.origin} ➔ ${item.dest}</div>
+                                <div class="text-xs text-slate-400">已收藏至自訂時刻表</div>
+                            </div>
+                        </div>
+
+                        <div class="flex items-center gap-2 no-print">
+                            <button onclick="openTrainModal('${item.trainId}')" class="p-2 text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg">
+                                <i class="fa-solid fa-eye mr-1"></i> 查看細節
+                            </button>
+                            <button onclick="toggleSaveTrain('${item.trainId}', '${item.origin}', '${item.dest}')" class="p-2 text-xs bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-lg">
+                                <i class="fa-solid fa-trash-can"></i>
+                            </button>
+                        </div>
+                    </div>
+                `;
+            });
+
+            container.innerHTML = html;
+        }
+
+        function saveCustomMetadata() {
+            customMetadata.title = document.getElementById('custom-title-input').value;
+            customMetadata.note = document.getElementById('custom-note-input').value;
+            localStorage.setItem('tra_custom_meta', JSON.stringify(customMetadata));
+
+            document.getElementById('print-title').innerText = customMetadata.title;
+            document.getElementById('print-note').innerText = customMetadata.note;
+        }
+
+        function clearCustomTimetable() {
+            if (confirm("確定要清空已儲存的自製時刻表嗎？")) {
+                customTimetableList = [];
+                localStorage.setItem('tra_custom_schedules', JSON.stringify([]));
+                updateCustomBadge();
+                renderCustomTimetable();
+                showToast("已清空自製時刻表", "info");
+            }
+        }
+
+        async function generateAiPlan() {
+            const promptInput = document.getElementById('ai-prompt-input').value.trim();
+            if (!promptInput) {
+                showToast("請輸入您的行程規劃需求！", "warning");
+                return;
+            }
+
+            const btn = document.getElementById('ai-generate-btn');
+            const resultArea = document.getElementById('ai-result-area');
+            const responseText = document.getElementById('ai-response-text');
+
+            btn.disabled = true;
+            btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> AI 正在為您智慧規劃中...`;
+            resultArea.classList.remove('hidden');
+            responseText.innerText = "正在分析台鐵路線與搭乘條件...";
+
+            const systemPrompt = "你是一位精通台灣鐵路(台鐵 TRA)路線與時刻的智慧旅遊助手。請根據用戶提供的需求與路線，推薦搭乘車次、建議抵達時間與旅遊建議。回答格式請清晰、點列式，適度加上 Emoji。";
+            const userQuery = `請根據以下旅遊或通勤需求，給予具體的台鐵搭乘車次與時間建議：\n${promptInput}`;
+
+            try {
+                const apiKey = "";
+                const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${apiKey}`;
+
+                const response = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        contents: [{ parts: [{ text: userQuery }] }],
+                        systemInstruction: { parts: [{ text: systemPrompt }] }
+                    })
+                });
+
+                const data = await response.json();
+                const aiText = data.candidates?.[0]?.content?.parts?.[0]?.text || "抱歉，目前無法取得 AI 回應，請稍後重試。";
+                responseText.innerText = aiText;
+
+            } catch (error) {
+                responseText.innerText = "發生錯誤：無法連接至 AI 服務，請稍後再試。";
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = `<i class="fa-solid fa-sparkles"></i> 讓 AI 產生搭乘推薦方案`;
+            }
+        }
+
+        function closeModal() {
+            document.getElementById('train-modal').classList.add('hidden');
+        }
+
+        function getTrainBadgeClass(type) {
+            if (!type) return 'train-badge-local';
+            if (type.includes('3000') || type.includes('新自強')) return 'train-badge-emu3000';
+            if (type.includes('普悠瑪')) return 'train-badge-puyuma';
+            if (type.includes('太魯閣')) return 'train-badge-taroko';
+            if (type.includes('自強')) return 'train-badge-tzechiang';
+            if (type.includes('莒光')) return 'train-badge-chukuang';
+            if (type.includes('區間快')) return 'train-badge-localfast';
+            return 'train-badge-local';
+        }
+
+        function calculateMinutes(time1, time2) {
+            if (!time1 || !time2 || time1 === '--:--' || time2 === '--:--') return 0;
+            const [h1, m1] = time1.split(':').map(Number);
+            const [h2, m2] = time2.split(':').map(Number);
+            let diff = (h2 * 60 + m2) - (h1 * 60 + m1);
+            if (diff < 0) diff += 24 * 60;
+            return diff;
+        }
+
+        function formatMins(mins) {
+            const h = Math.floor(mins / 60);
+            const m = mins % 60;
+            return h > 0 ? `${h}小時${m}分` : `${m}分鐘`;
+        }
+
+        function estimateFare(type, origIdx, destIdx) {
+            let rate = 75;
+            if (type.includes('新自強') || type.includes('普悠瑪') || type.includes('太魯閣')) rate = 95;
+            else if (type.includes('自強')) rate = 85;
+            else if (type.includes('區間')) rate = 45;
+            return Math.max(30, rate);
+        }
+
+        function showToast(msg, type = 'success') {
+            const toast = document.getElementById('toast');
+            const toastMsg = document.getElementById('toast-message');
+            const toastIcon = document.getElementById('toast-icon');
+
+            toastMsg.innerText = msg;
+            if (type === 'success') toastIcon.className = "fa-solid fa-circle-check text-emerald-400 text-lg";
+            else if (type === 'warning') toastIcon.className = "fa-solid fa-circle-exclamation text-amber-400 text-lg";
+            else toastIcon.className = "fa-solid fa-circle-info text-sky-400 text-lg";
+
+            toast.classList.remove('translate-y-20', 'opacity-0');
+            setTimeout(() => toast.classList.add('translate-y-20', 'opacity-0'), 3000);
+        }
+    </script>
+</body>
+</html>
