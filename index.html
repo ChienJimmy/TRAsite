@@ -784,6 +784,162 @@
             return found ? found.name : id;
         }
 
+        async function renderStationBoard() {
+            const stationName = document.getElementById('board-station').value;
+            const directionFilter = document.getElementById('board-direction').value;
+            const boardRows = document.getElementById('board-rows');
+            const boardTitle = document.getElementById('board-display-title');
+            
+            if (boardTitle) {
+                boardTitle.innerText = `${stationName}車站 發車資訊 Departure Board`;
+            }
+
+            const token = await getTdxAccessToken();
+            if (!token) {
+                if (boardRows) {
+                    boardRows.innerHTML = `
+                        <tr>
+                            <td colspan="7" class="py-8 text-center text-amber-400 font-sans">
+                                <i class="fa-solid fa-key text-2xl mb-2 block"></i>
+                                請先於右上角設定 TDX 官方 API 金鑰以載入即時看板資料
+                            </td>
+                        </tr>
+                    `;
+                }
+                return;
+            }
+
+            if (boardRows) {
+                boardRows.innerHTML = `
+                    <tr>
+                        <td colspan="7" class="py-8 text-center text-slate-400 font-sans">
+                            <i class="fa-solid fa-spinner fa-spin text-2xl mb-2 text-emerald-400 block"></i>
+                            正在連線至台鐵 TDX 官方伺服器取得 ${stationName} 站即時列車看板...
+                        </td>
+                    </tr>
+                `;
+            }
+
+            const stationId = getStationIdByName(stationName);
+            const trainDate = document.getElementById('search-date')?.value || new Date().toISOString().split('T')[0];
+
+            try {
+                // 1. 優先請求 TDX 即時看板 API (LiveBoard)
+                let liveUrl = `https://tdx.transportdata.tw/api/basic/v2/Rail/TRA/LiveBoard/Station/${stationId}?$format=JSON`;
+                let res = await fetch(liveUrl, { headers: { 'Authorization': `Bearer ${token}` } });
+                let liveData = res.ok ? await res.json() : [];
+
+                let items = [];
+
+                if (Array.isArray(liveData) && liveData.length > 0) {
+                    items = liveData.map(item => {
+                        const time = item.ScheduledDepartureTime || item.ScheduledArrivalTime || "--:--";
+                        const shortTime = time.substring(0, 5);
+                        const typeName = item.TrainTypeName ? item.TrainTypeName.Zh_tw.replace(/（.*）/, '') : "列車";
+                        const delay = item.DelayTime || 0;
+                        let statusText = "準點";
+                        let statusClass = "text-emerald-400";
+                        if (delay > 0) {
+                            statusText = `晚 ${delay} 分`;
+                            statusClass = "text-rose-400 animate-pulse";
+                        }
+
+                        return {
+                            time: shortTime,
+                            trainNo: item.TrainNo,
+                            type: typeName,
+                            dest: item.EndingStationName ? item.EndingStationName.Zh_tw : "---",
+                            direction: item.Direction, // 0: 順行, 1: 逆行
+                            platform: item.Platform || "1",
+                            statusText,
+                            statusClass
+                        };
+                    });
+                } else {
+                    // 2. 備援機制：如 LiveBoard 無資料，請求當日車站時刻表 (DailyTimetable)
+                    let dailyUrl = `https://tdx.transportdata.tw/api/basic/v2/Rail/TRA/DailyTimetable/Station/${stationId}/${trainDate}?$format=JSON`;
+                    res = await fetch(dailyUrl, { headers: { 'Authorization': `Bearer ${token}` } });
+                    let dailyData = res.ok ? await res.json() : [];
+
+                    if (Array.isArray(dailyData)) {
+                        items = dailyData.map(item => {
+                            const time = item.DepartureTime || item.ArrivalTime || "--:--";
+                            const typeName = item.TrainTypeName ? item.TrainTypeName.Zh_tw.replace(/（.*）/, '') : "列車";
+                            return {
+                                time: time.substring(0, 5),
+                                trainNo: item.TrainNo,
+                                type: typeName,
+                                dest: item.EndingStationName ? item.EndingStationName.Zh_tw : "---",
+                                direction: item.Direction,
+                                platform: "1",
+                                statusText: "準點",
+                                statusClass: "text-emerald-400"
+                            };
+                        });
+                    }
+                }
+
+                // 方向過濾 (TDX Direction: 0 = 順行, 1 = 逆行)
+                if (directionFilter === 'southbound') {
+                    items = items.filter(i => i.direction === 0);
+                } else if (directionFilter === 'northbound') {
+                    items = items.filter(i => i.direction === 1);
+                }
+
+                // 依開車時間排序
+                items.sort((a, b) => a.time.localeCompare(b.time));
+
+                if (items.length === 0) {
+                    if (boardRows) {
+                        boardRows.innerHTML = `
+                            <tr>
+                                <td colspan="7" class="py-8 text-center text-slate-400 font-sans">
+                                    <i class="fa-solid fa-circle-info text-xl mb-1 block text-amber-400"></i>
+                                    目前 ${stationName} 站無符合條件之開行列車紀錄
+                                </td>
+                            </tr>
+                        `;
+                    }
+                    return;
+                }
+
+                let html = '';
+                items.forEach(item => {
+                    html += `
+                        <tr class="hover:bg-slate-800/60 transition border-b border-slate-800/60">
+                            <td class="py-3 px-3 text-amber-300 font-bold">${item.time}</td>
+                            <td class="py-3 px-3 text-slate-200 font-sans font-medium">${item.type}</td>
+                            <td class="py-3 px-3 text-sky-300 font-bold">${item.trainNo}</td>
+                            <td class="py-3 px-3 text-slate-100 font-sans">${item.dest}</td>
+                            <td class="py-3 px-3 text-center text-slate-300">${item.platform}</td>
+                            <td class="py-3 px-3 text-right font-bold ${item.statusClass}">${item.statusText}</td>
+                            <td class="py-3 px-3 text-center font-sans">
+                                <button onclick="openTrainModal('${item.trainNo}')" class="px-2 py-1 text-xs bg-slate-700 hover:bg-slate-600 text-slate-200 rounded transition" title="查看列車細節">
+                                    <i class="fa-solid fa-circle-info"></i>
+                                </button>
+                            </td>
+                        </tr>
+                    `;
+                });
+
+                if (boardRows) {
+                    boardRows.innerHTML = html;
+                }
+
+            } catch (err) {
+                console.error("Station Board Error:", err);
+                if (boardRows) {
+                    boardRows.innerHTML = `
+                        <tr>
+                            <td colspan="7" class="py-8 text-center text-rose-400 font-sans">
+                                無法讀取 ${stationName} 站動態電子看板資料，請檢查 TDX 連線狀態
+                            </td>
+                        </tr>
+                    `;
+                }
+            }
+        }
+
         async function handleRouteSearch() {
             const container = document.getElementById('route-results-list');
             const token = await getTdxAccessToken();
@@ -1014,17 +1170,24 @@
             const trainDate = document.getElementById('search-date').value || new Date().toISOString().split('T')[0];
 
             try {
-                const url = `https://tdx.transportdata.tw/api/basic/v2/Rail/TRA/DailyTimetable/TrainNo/${input}/${trainDate}?$format=JSON`;
-                const res = await fetch(url, { headers: { 'Authorization': `Bearer ${token}` } });
-                if (!res.ok) throw new Error("TDX Error");
-                const data = await res.json();
+                // Correct TDX Endpoint Syntax: TrainDate endpoint + OData filter
+                let url = `https://tdx.transportdata.tw/api/basic/v2/Rail/TRA/DailyTimetable/TrainDate/${trainDate}?$filter=DailyTrainInfo/TrainNo eq '${input}'&$format=JSON`;
+                let res = await fetch(url, { headers: { 'Authorization': `Bearer ${token}` } });
+                let data = res.ok ? await res.json() : [];
+
+                // Fallback: If date-filtered query returned empty, try TrainNo endpoint directly
+                if (!Array.isArray(data) || data.length === 0) {
+                    url = `https://tdx.transportdata.tw/api/basic/v2/Rail/TRA/DailyTimetable/TrainNo/${input}?$format=JSON`;
+                    res = await fetch(url, { headers: { 'Authorization': `Bearer ${token}` } });
+                    if (res.ok) data = await res.json();
+                }
 
                 if (!Array.isArray(data) || data.length === 0) {
                     container.innerHTML = `
                         <div class="bg-white rounded-2xl p-8 text-center border border-slate-200 shadow-sm">
                             <i class="fa-solid fa-triangle-exclamation text-4xl text-amber-500 mb-3"></i>
-                            <p class="font-bold text-slate-700">台鐵官方回傳：本日未開行車次「${input}」</p>
-                            <p class="text-xs text-slate-400 mt-1">請檢查車次數字或日期是否正確</p>
+                            <p class="font-bold text-slate-700">台鐵官方資料庫回傳：於 ${trainDate} 未查獲車次「${input}」開行資料</p>
+                            <p class="text-xs text-slate-400 mt-1">請確認車次號碼，或切換搭乘日期重試</p>
                         </div>
                     `;
                     return;
@@ -1103,101 +1266,11 @@
                 `;
 
             } catch (err) {
+                console.error("Train Search Error:", err);
                 container.innerHTML = `
                     <div class="bg-rose-50 p-6 rounded-2xl text-center text-rose-700 font-bold">
-                        無法取得車次 ${input} 資料，請檢查網路連線或 API 金鑰。
+                        無法取得車次 ${input} 資料，請檢查網路連線或 API 金鑰權限。
                     </div>
-                `;
-            }
-        }
-
-        async function renderStationBoard() {
-            const stationName = document.getElementById('board-station').value;
-            const direction = document.getElementById('board-direction').value;
-            
-            document.getElementById('board-display-title').innerText = `${stationName}車站 即時發車看板 Departure Board`;
-
-            const rowsContainer = document.getElementById('board-rows');
-            const token = await getTdxAccessToken();
-
-            if (!token) {
-                rowsContainer.innerHTML = `
-                    <tr>
-                        <td colspan="7" class="py-8 text-center text-amber-400">請設定 TDX API 金鑰以檢視實時車站看板</td>
-                    </tr>
-                `;
-                return;
-            }
-
-            const stationId = getStationIdByName(stationName);
-
-            try {
-                const url = `https://tdx.transportdata.tw/api/basic/v2/Rail/TRA/LiveBoard/Station/${stationId}?$format=JSON`;
-                const res = await fetch(url, { headers: { 'Authorization': `Bearer ${token}` } });
-                if (!res.ok) throw new Error("LiveBoard Error");
-                const data = await res.json();
-
-                if (!Array.isArray(data) || data.length === 0) {
-                    rowsContainer.innerHTML = `
-                        <tr>
-                            <td colspan="7" class="py-8 text-center text-slate-400">目前站點無近期發車動態</td>
-                        </tr>
-                    `;
-                    return;
-                }
-
-                let boardRows = data.filter(item => {
-                    if (direction === 'southbound' && item.Direction !== 0) return false;
-                    if (direction === 'northbound' && item.Direction !== 1) return false;
-                    return true;
-                });
-
-                if (boardRows.length === 0) {
-                    rowsContainer.innerHTML = `
-                        <tr>
-                            <td colspan="7" class="py-8 text-center text-slate-400">指定方向無近期列車動態</td>
-                        </tr>
-                    `;
-                    return;
-                }
-
-                let html = '';
-                boardRows.forEach(row => {
-                    const time = row.ScheduledDepartureTime || row.ScheduledArrivalTime || '--:--';
-                    const typeName = row.TrainTypeName ? row.TrainTypeName.Zh_tw.replace(/（.*）/, '') : '列車';
-                    const dest = row.EndingStationName ? row.EndingStationName.Zh_tw : '終點站';
-                    const delayMins = row.DelayTime || 0;
-                    
-                    let statusText = '<span class="text-emerald-400 font-bold">準點 ON TIME</span>';
-                    if (delayMins > 0) {
-                        statusText = `<span class="text-rose-400 font-bold">晚 ${delayMins} 分 LATE</span>`;
-                    }
-
-                    html += `
-                        <tr class="hover:bg-slate-800/60 transition">
-                            <td class="py-3 px-3 text-emerald-400 font-bold">${time}</td>
-                            <td class="py-3 px-3 text-amber-300 font-bold">${typeName}</td>
-                            <td class="py-3 px-3 text-sky-300 font-bold">${row.TrainNo}</td>
-                            <td class="py-3 px-3 text-white font-bold">${dest}</td>
-                            <td class="py-3 px-3 text-center text-amber-400">${row.Platform || '1'} 月台</td>
-                            <td class="py-3 px-3 text-right">${statusText}</td>
-                            <td class="py-3 px-3 text-center">
-                                <button onclick="openTrainModal('${row.TrainNo}')" class="text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 px-2 py-1 rounded border border-slate-700">
-                                    詳細
-                                </button>
-                            </td>
-                        </tr>
-                    `;
-                });
-
-                rowsContainer.innerHTML = html;
-
-            } catch (err) {
-                console.error("Board error:", err);
-                rowsContainer.innerHTML = `
-                    <tr>
-                        <td colspan="7" class="py-8 text-center text-rose-400">無法連線取得車站動態看板資料</td>
-                    </tr>
                 `;
             }
         }
@@ -1218,12 +1291,18 @@
             const trainDate = document.getElementById('search-date').value || new Date().toISOString().split('T')[0];
 
             try {
-                const url = `https://tdx.transportdata.tw/api/basic/v2/Rail/TRA/DailyTimetable/TrainNo/${trainId}/${trainDate}?$format=JSON`;
-                const res = await fetch(url, { headers: { 'Authorization': `Bearer ${token}` } });
-                const data = await res.json();
+                let url = `https://tdx.transportdata.tw/api/basic/v2/Rail/TRA/DailyTimetable/TrainDate/${trainDate}?$filter=DailyTrainInfo/TrainNo eq '${trainId}'&$format=JSON`;
+                let res = await fetch(url, { headers: { 'Authorization': `Bearer ${token}` } });
+                let data = res.ok ? await res.json() : [];
 
                 if (!Array.isArray(data) || data.length === 0) {
-                    document.getElementById('modal-stop-list').innerHTML = `<p class="text-center text-xs text-slate-400 py-4">查無此車次詳細資訊</p>`;
+                    url = `https://tdx.transportdata.tw/api/basic/v2/Rail/TRA/DailyTimetable/TrainNo/${trainId}?$format=JSON`;
+                    res = await fetch(url, { headers: { 'Authorization': `Bearer ${token}` } });
+                    if (res.ok) data = await res.json();
+                }
+
+                if (!Array.isArray(data) || data.length === 0) {
+                    document.getElementById('modal-stop-list').innerHTML = `<p class="text-center text-xs text-slate-400 py-4">於 ${trainDate} 查無此車次詳細資訊</p>`;
                     return;
                 }
 
